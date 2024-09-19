@@ -1,4 +1,5 @@
 /* CGI 프로그램, 웹 서버에서 실행 되며 두 숫자를 더하는 간단한 웹 애플리케이션이다. */
+// 43.201.86.79
 #include "csapp.h"
 
 int main(void) {
@@ -11,8 +12,8 @@ int main(void) {
   if ((buf = getenv("QUERY_STRING")) != NULL) {   // 환경변수를 통해 전달된 URL 쿼리 문자열을 가져옴. ex) 1&2
     p = strchr(buf, '&');   // & 문자를 찾아서 arg1과 arg2로 나누기 위한 포인터를 저장함.
     *p = '\0';  // & 문자를 \0로 대체해서 문자열을 두 부분으로 나눔.
-    strcpy(arg1, buf);  // 1
-    strcpy(arg2, p+1);  // 2
+    strcpy(arg1, buf + 5);  // num1=1213 이런식으로 숫자가 5번 뒤에 오니까 포인터 5 뒤로 보냄
+    strcpy(arg2, p+1 + 5);  // 같은 이유임.
     
     // 문자열로 저장된 두 값을 정수로 변환
     n1 = atoi(arg1);  

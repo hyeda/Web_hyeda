@@ -12,6 +12,13 @@
         동영상 태그 지원 안함.
     </video>
     양꼬치 냠냠.
+    <form action="/cgi-bin/adder" method="get">
+        <label for="num1">첫번째 숫자</label>
+        <input type="number" id="num1" name="num1">
+        <label for="num2">두번째 숫자</label>
+        <input type="number" id="num2" name="num2"> 
+        <button type="submit">더하기</button>   <!--type = submit 로 하면 URL의 쿼리 문자열로 붙어서 서버로 전송-->
+    </form>
 </body>
 </html>
 

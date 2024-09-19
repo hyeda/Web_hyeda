@@ -7,15 +7,19 @@
 void doit(int fd);   // 클라이언트의 요청을 처리하는 핵심 함수.
 void read_requesthdrs(rio_t *rp);   // 클라이언트로부터 받은 HTTP 요청 헤더를 읽는다.
 int parse_uri(char *uri, char *filename, char *cgiargs);  // 클라이언트 요청 URI를 분석하여, 정적 또는 동적 콘텐츠 요청을 구분함.
-void serve_static(int fd, char *filename, int filesize);  // 정적 파일을 클라이언트에게 제공하는 함수.
+void serve_static(int fd, char *filename, int filesize, char *method);  // 정적 파일을 클라이언트에게 제공하는 함수.
 void get_filetype(char *filename, char *filetype);  // 요청된 파일의 MIME 타입을 결정하는 함수.
-void serve_dynamic(int fd, char *filename, char *cgiargs);  // 동적 콘텐츠를 실행하여 클라이언트에게 제공하는 함수.
+void serve_dynamic(int fd, char *filename, char *cgiargs, char *method);  // 동적 콘텐츠를 실행하여 클라이언트에게 제공하는 함수.
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg);   // 클라이언트의 요청이 잘못 됐을 때 오류 메세지를 보냄.
+
+
 
 /* Tiny라는 간단한 웹 서버의 메인 루틴이다. 이 서버는 클라이언트로부터 연결 요청을 받고, 요청을 처리한 후 응답을 보내는 기본적인 수행을 한다.
  * 이 프로그램은 포트 번호를 *명령줄 인수*로 받는다. */
 int main(int argc, char **argv)  //argc는 인수의 개수, argv는 인수의 배열 
 {
+  signal(SIGPIPE,SIG_IGN);  // 파이프 또는 소켓 통신에서 발생할 수 있는 SIGPIPE 시그널을 무시하는 코드.
+  
   // 서버가 클라이언트의 연결 요청을 기다리는 리슨 소켓의 파일 디스크립터, 클라이언트가 서버에 연결된 후, 데이터를 주고받기 위한 연결 소켓의 파일 디스크립터
   int listenfd, connfd; 
 
@@ -64,13 +68,13 @@ void doit(int fd)
   printf("%s", buf);  // 버퍼에 저장된 데이터를 출력한다. 여기서 buf는 요청 라인임. (HTTP 메소드, URI, 버전정보)
   sscanf(buf, "%s %s %s", method, uri, version);  // 요청라인에서 각각 추출해서 저장함.
 
-  // 클라이언트의 요청 메소드가 GET인지 비교함.
-  if (strcasecmp(method, "GET")) {
-    clienterror(fd, method, "501", "Not implemented", "Tiny does not implement this method");   // GET이외의 메소드를 사용하면 클라이언트에게 메세지를 보냄.
+  // 클라이언트의 요청 메소드가 GET인지, HEAD인지 비교함.
+  if (strcasecmp(method, "GET") && strcasecmp(method, "HEAD")) {
+    clienterror(fd, method, "501", "Not implemented", "Tiny does not implement this method");   // GET, HEAD이외의 메소드를 사용하면 클라이언트에게 메세지를 보냄.
     return;
   }
   read_requesthdrs(&rio);   // 추가적인 요청 헤더를 처리하는 함수, 클라이언트가 어떤 요청을 했는지 확인하기 위해 읽음.
-
+  
   // URI 파싱 : 클라이언트가 요청한 URI를 분석하여, 요청된 리소스가 정적인지 동적인지 결정함.
   // 정적 콘텐츠라면 filename에 요청된 파일 경로 저장, is_static = 1로 설정
   // 동적 콘텐츠라면 CGI인자들을 cgiargs에 저장하고, is_static = 0으로 설정
@@ -88,7 +92,7 @@ void doit(int fd)
       clienterror(fd, filename, "403", "Forbidden", "Tiny couldn't read the file");
       return;
     }
-    serve_static(fd, filename, sbuf.st_size);   // 파일이 일반 파일이고, 읽기 권한이 있다면 이 함수를 통해 파일을 클라이언트로 전송.
+    serve_static(fd, filename, sbuf.st_size, method);   // 파일이 일반 파일이고, 읽기 권한이 있다면 이 함수를 통해 파일을 클라이언트로 전송.
   }
   else {  // 동적 콘텐츠 처리
 
@@ -97,7 +101,7 @@ void doit(int fd)
       clienterror(fd, filename, "403", "Forbidden", "Tiny couldn't run the CGI program");
       return;
     }
-    serve_dynamic(fd, filename, cgiargs);   // 실행 권한이 있다면, 이 함수를 통해 CGI 프로그램을 실행하고, 결과를 클라이언트에 전송.
+    serve_dynamic(fd, filename, cgiargs, method);   // 실행 권한이 있다면, 이 함수를 통해 CGI 프로그램을 실행하고, 결과를 클라이언트에 전송.
   }
 }
 
@@ -160,12 +164,12 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
   else {  // cgi-bin이 포함되어 있다면 동적 콘텐츠.
     ptr = index(uri, '?');  // '?' 문자를 찾아서 CGI 인자를 분리.
     if (ptr) {  // NULL이 아니라면 유효한 주소를 가리키고 있으므로 '참'으로 평가 됨.
-      strcpy(cgiargs, ptr+1);   // '?' 이후의 부분을 cgiargs에 복사 (CGI 인자)
+      strcpy(cgiargs, ptr+1);   // '?' 이후의 부분을 cgiargs에 복사 (CGI 인자).
       *ptr = '\0';  // '?' 문자를 NULL로 대체해서 filename을 끝냄.
     }
     else  
       strcpy(cgiargs, "");  // '?'가 없으면 CGI 인자는 없으므로 빈 문자열로 설정함.
-    strcpy(filename, ".");  // 현재 디렉토리로 시작
+    strcpy(filename, ".");  // 현재 디렉토리로 시작.
     strcat(filename, uri);  // URI를 filename에 이어 붙임.
     return 0;   // 동적 콘텐츠를 나타냄.
   }
@@ -173,7 +177,7 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
 
 /* 정적 콘텐츠(디스크에 저장된 파일)를 클라이언트에게 제공하는 역할.
  * 클라이언트가 요청한 파일을 읽어서 그 내용을 클라이언트에게 전송한다. */
-void serve_static(int fd, char *filename, int filesize)   // fd에 데이터를 보내는게 클라이언트에게 응답을 보내는 것과 동일.
+void serve_static(int fd, char *filename, int filesize, char *method)   // fd에 데이터를 보내는게 클라이언트에게 응답을 보내는 것과 동일.
 {
   int srcfd;  // 요청한 파일을 열 때 반환되는 파일 디스크립터를 저장하는 변수.
   char *srcp, filetype[MAXLINE], buf[MAXBUF];   // 요청한 파일을 메모리 매핑한 후 반환되는 메모리 영역의 시작 주소.
@@ -191,14 +195,25 @@ void serve_static(int fd, char *filename, int filesize)   // fd에 데이터를 
   printf("Response headers:\n");        
   printf("%s", buf);  // 터미널에 출력해서 어떤 헤더가 전송됐는지 개발자에게 보여줌.
 
-  srcfd = Open(filename, O_RDONLY, 0);  // 파일을 (읽기 전용으로) 열고 해당 파일을 식별하는 고유한 정수(fd)를 반환. 
+  // method GET일때만 파일 열수 있게 만들기.
+  if (!strcasecmp(method, "GET")) {   
+    srcfd = Open(filename, O_RDONLY, 0);  // 파일을 (읽기 전용으로) 열고 해당 파일을 식별하는 고유한 정수(fd)를 반환. 
+    
+    // *메모리 매핑* 방식으로 파일을 읽음. 파일을 메모리에 매핑하면, 해당 파일을 메모리처럼 다룰 수 있어 효율적인 파일 읽기 작업이 가능함.
+    // srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);  
+
+    // Close(srcfd);   // 파일 디스크립터를 닫고(연결을 종료) 운영체제의 자원을 반환하는 함수.
+    // Rio_writen(fd, srcp, filesize);   // 매핑한 메모리의 파일 내용을 클라이언트에게 전송.
+    // Munmap(srcp, filesize);   // 사용한 메모리 매핑을 해제함.
+    
+    srcp = (char *)malloc(filesize);  // 메모리 파일 사이즈만큼 할당.
+    Rio_readn(srcfd, srcp, filesize);   // srcfd에서 사이즈바이트 만큼 데이터를 읽어서, srcp에 저장.
+    
+    Close(srcfd);   // 파일 디스크립터를 닫고(연결을 종료) 운영체제의 자원을 반환하는 함수.
+    Rio_writen(fd, srcp, filesize);   // 메모리의 파일 내용을 클라이언트에게 전송.
+    free(srcp);   // malloc과 항상 세트
+  }
   
-  // *메모리 매핑* 방식으로 파일을 읽음. 파일을 메모리에 매핑하면, 해당 파일을 메모리처럼 다룰 수 있어 효율적인 파일 읽기 작업이 가능함.
-  srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);   
-  
-  Close(srcfd);   // 파일 디스크립터를 닫고(연결을 종료) 운영체제의 자원을 반환하는 함수.
-  Rio_writen(fd, srcp, filesize);   // 매핑한 메모리의 파일 내용을 클라이언트에게 전송.
-  Munmap(srcp, filesize);   // 사용한 메모리 매핑을 해제함.
 }
 
 /* filename의 파일 확장자를 확인하여 그에 맞는 MIME 타입을 filetype에 저장하는 함수. 
@@ -220,7 +235,7 @@ void get_filetype(char *filename, char *filetype)
 }
 
 /* Tiny 웹 서버가 CGI 프로그램을 실행해서 클라이언트에게 동적 콘텐츠(CGI 프로그램의 출력 결과)를 제공하는 역할. */
-void serve_dynamic(int fd, char *filename, char *cgiargs)
+void serve_dynamic(int fd, char *filename, char *cgiargs, char *method)
 {
   char buf[MAXLINE], *emptylist[] = { NULL };
 
@@ -230,23 +245,25 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
   sprintf(buf, "Server: Tiny Web Server\r\n");
   Rio_writen(fd, buf, strlen(buf));
 
-  // 프로세스 분기 *Fork*
-  if (Fork() == 0) {  // 자식 프로세스를 의미.
-    
-    setenv("QUERY_STRING", cgiargs, 1);   
-    // 자식 프로세스가 실행 되기 전에 CGI 환경 변수 설정. 이 변수는 CGI 프로그램이 클라이언트로부터 전달받은 쿼리 매개변수를 인식할 수 있도록 하는 역할을 함.
-    // 첫번째 인자: 환경 변수의 이름. -> 프로그램에서 이 변수를 사용해서 쿼리 문자열을 읽는다.
-    // 두번째 인자: 환경 변수 값 -> 클라이언트가 URI에서 보내온 쿼리 문자열 ex) 15000&213
-    // 세번째 인자: 1 -> 기존 값을 덮어쓰겠다. 0 -> 환경 변수를 새로 설정하겠다. 
+  if (!strcasecmp(method, "GET")) {
+    // 프로세스 분기 *Fork*
+    if (Fork() == 0) {  // 자식 프로세스를 의미.
+      
+      setenv("QUERY_STRING", cgiargs, 1);   
+      // 자식 프로세스가 실행 되기 전에 CGI 환경 변수 설정. 이 변수는 CGI 프로그램이 클라이언트로부터 전달받은 쿼리 매개변수를 인식할 수 있도록 하는 역할을 함.
+      // 첫번째 인자: 환경 변수의 이름. -> 프로그램에서 이 변수를 사용해서 쿼리 문자열을 읽는다.
+      // 두번째 인자: 환경 변수 값 -> 클라이언트가 URI에서 보내온 쿼리 문자열 ex) 15000&213
+      // 세번째 인자: 1 -> 기존 값을 덮어쓰겠다. 0 -> 환경 변수를 새로 설정하겠다. 
 
-    Dup2(fd, STDOUT_FILENO);  // fd의 디스크립터가 STDOUT_FILENO에 복제 됨. 따라서 자식 프로세스가 표준 출력을 통해 데이터를 쓰면,
-    // 이 데이터는 fd가 가리키는 대상(지금은 클라이언트와의 연결 소켓)에 쓰이게 됨.
-    // CGI 프로그램이 출력하는 모든 내용이 클라이언트로 직접 전달됩니다.
+      Dup2(fd, STDOUT_FILENO);  // fd의 디스크립터가 STDOUT_FILENO에 복제 됨. 따라서 자식 프로세스가 표준 출력을 통해 데이터를 쓰면,
+      // 이 데이터는 fd가 가리키는 대상(지금은 클라이언트와의 연결 소켓)에 쓰이게 됨.
+      // CGI 프로그램이 출력하는 모든 내용이 클라이언트로 직접 전달됩니다.
 
-    Execve(filename, emptylist, environ);   // 자식 프로세스가 CGI 프로그램(filename)을 실행하게 함. environ(현재 프로세스의 환경 변수 QUERY_STRING)
-    // CGI 프로그램을 실행하고, 자식 프로세스의 현재 프로세스를 CGI 프로그램으로 교체함. 
-    // CGI 프로그램의 인자는 환경 변수(environ)를 통해 전달되며, 별도의 인자 배열이 필요하지 않습니다. 따라서 emptylist를 사용하여 빈 배열을 전달합니다.
-    // Execve 호출 이후에는 현재 프로세스가 CGI 프로그램으로 대체되므로, 자식 프로세스의 나머지 코드는 실행되지 않습니다.
+      Execve(filename, emptylist, environ);   // 자식 프로세스가 CGI 프로그램(filename)을 실행하게 함. environ(현재 프로세스의 환경 변수 QUERY_STRING)
+      // CGI 프로그램을 실행하고, 자식 프로세스의 현재 프로세스를 CGI 프로그램으로 교체함. 
+      // CGI 프로그램의 인자는 환경 변수(environ)를 통해 전달되며, 별도의 인자 배열이 필요하지 않습니다. 따라서 emptylist를 사용하여 빈 배열을 전달합니다.
+      // Execve 호출 이후에는 현재 프로세스가 CGI 프로그램으로 대체되므로, 자식 프로세스의 나머지 코드는 실행되지 않습니다.
+    }
+    Wait(NULL);   // 부모 프로세스가 자식 프로세스 종료를 기다리고 종료되면 자식 프로세스를 수거함.
   }
-  Wait(NULL);   // 부모 프로세스가 자식 프로세스 종료를 기다리고 종료되면 자식 프로세스를 수거함.
 }

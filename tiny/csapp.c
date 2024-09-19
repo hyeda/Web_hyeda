@@ -32,7 +32,10 @@
 void unix_error(char *msg) /* Unix-style error */
 {
     fprintf(stderr, "%s: %s\n", msg, strerror(errno));
-    exit(0);
+    if(errno!=EPIPE){   //SIGPIPE 상황이 아닌 에러일때만 프로그램 종료. EPIPE = SIGPIPE 관련 에러 코드
+        exit(0);
+    }
+    
 }
 /* $end unixerror */
 
