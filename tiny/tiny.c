@@ -138,9 +138,9 @@ void read_requesthdrs(rio_t *rp)
 {
   char buf[MAXLINE];  // 버퍼: 한 줄씩 읽어 저장할 공간.
 
-  Rio_readlineb(rp, buf, MAXLINE);  // 첫 줄은 요청 라인임. 요청 헤더는 요청 라인 다음에 이어진다.
+  Rio_readlineb(rp, buf, MAXLINE);  // 요청라인 첫줄은 Host내용이라 HTTP 1.0에선 필요없어서 프린트 안함.
 
-  while(strcmp(buf, "\r\n")) {  // '\r\n'(빈줄 : 헤더의 끝)이 나올 때까지 계속 요청 헤더를 읽음.
+  while(strcmp(buf, "\r\n")) {  // '\r\n'(빈줄 : 헤더의 끝)이 나올 때까지 계속 요청 헤더를 읽음. -> 같아지면 0이 반환되서 false
     Rio_readlineb(rp, buf, MAXLINE);  // 한 줄 씩 읽고
     printf("%s", buf);  // 읽은 헤더를 출력.
   }
@@ -199,19 +199,19 @@ void serve_static(int fd, char *filename, int filesize, char *method)   // fd에
   if (!strcasecmp(method, "GET")) {   
     srcfd = Open(filename, O_RDONLY, 0);  // 파일을 (읽기 전용으로) 열고 해당 파일을 식별하는 고유한 정수(fd)를 반환. 
     
-    // *메모리 매핑* 방식으로 파일을 읽음. 파일을 메모리에 매핑하면, 해당 파일을 메모리처럼 다룰 수 있어 효율적인 파일 읽기 작업이 가능함.
-    // srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);  
+    //*메모리 매핑* 방식으로 파일을 읽음. 파일을 메모리에 매핑하면, 해당 파일을 메모리처럼 다룰 수 있어 효율적인 파일 읽기 작업이 가능함.
+    srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);  
 
-    // Close(srcfd);   // 파일 디스크립터를 닫고(연결을 종료) 운영체제의 자원을 반환하는 함수.
-    // Rio_writen(fd, srcp, filesize);   // 매핑한 메모리의 파일 내용을 클라이언트에게 전송.
-    // Munmap(srcp, filesize);   // 사용한 메모리 매핑을 해제함.
-    
-    srcp = (char *)malloc(filesize);  // 메모리 파일 사이즈만큼 할당.
-    Rio_readn(srcfd, srcp, filesize);   // srcfd에서 사이즈바이트 만큼 데이터를 읽어서, srcp에 저장.
-    
     Close(srcfd);   // 파일 디스크립터를 닫고(연결을 종료) 운영체제의 자원을 반환하는 함수.
-    Rio_writen(fd, srcp, filesize);   // 메모리의 파일 내용을 클라이언트에게 전송.
-    free(srcp);   // malloc과 항상 세트
+    Rio_writen(fd, srcp, filesize);   // 매핑한 메모리의 파일 내용을 클라이언트에게 전송.
+    Munmap(srcp, filesize);   // 사용한 메모리 매핑을 해제함.
+    
+    // srcp = (char *)malloc(filesize);  // 메모리 파일 사이즈만큼 할당.
+    // Rio_readn(srcfd, srcp, filesize);   // srcfd에서 사이즈바이트 만큼 데이터를 읽어서, srcp에 저장.
+    
+    // Close(srcfd);   // 파일 디스크립터를 닫고(연결을 종료) 운영체제의 자원을 반환하는 함수.
+    // Rio_writen(fd, srcp, filesize);   // 메모리의 파일 내용을 클라이언트에게 전송.
+    // free(srcp);   // malloc과 항상 세트
   }
   
 }
